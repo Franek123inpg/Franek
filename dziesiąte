@@ -1,0 +1,373 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+//Liczba prób w metodzie Monte Carlo
+const IL_PROB=1000000;
+
+//Klasa opisująca rozkład ręki
+class rozklad {
+protected:
+    int wart[4];
+    int poziom;
+    int licznik;
+public:
+    rozklad(int *wart,int poziom);
+    virtual void inkrementuj(int *wart);
+    double prawdopodobienstwo(int il_prob);
+    char* wez_kod();
+    virtual void dopisz_HTML(int il_prob);
+    virtual ~rozklad();
+};
+
+//Klasa opisująca węzeł drzewa (np. rozkład 5-4-x-x)
+class wezel: public rozklad {
+    rozklad *dzieci[14];
+public:
+    wezel(int *wart,int poziom);
+    virtual void inkrementuj(int *wart);
+    virtual void dopisz_HTML(int il_prob);
+    virtual ~wezel();
+};
+
+
+//Klasa rozklad
+rozklad::rozklad(int *wart,int poziom):
+    poziom(poziom),
+    licznik(0) {
+    memcpy(this->wart,wart,sizeof(this->wart));
+}
+
+void rozklad::inkrementuj(int *) {
+    licznik++;
+}
+
+double rozklad::prawdopodobienstwo(int il_prob) {
+    return double(licznik)/il_prob;
+}
+
+char* rozklad::wez_kod() {
+    static char kod[13];
+    kod[0]=0;
+    for (int n=0;n<=3;n++)
+        if (n<=poziom)
+            sprintf(kod+strlen(kod),"-%d",wart[n]);
+        else strcat(kod,"-x");
+    return kod+1;
+}
+
+void rozklad::dopisz_HTML(int il_prob) {
+    double p=prawdopodobienstwo(il_prob)*100;
+    if (p<0.01)
+        return;
+    int poz=poziom==3 ? 2 : poziom;
+
+    printf(
+        "\t\t<tr>\n"
+    );
+    if (poz>0)
+        if (poz>1)
+             printf("\t\t\t<td colspan=\"%d\" width=\"%d%%\">&nbsp;</td>\n",
+                poz,poz*10);
+        else printf("\t\t\t<td width=\"10%%\">&nbsp;</td>\n");
+    if (poz<2)
+         printf("\t\t\t<td colspan=\"%d\" width=\"%d%%\" align=\"left\">%s</td>\n",
+            3-poz,(3-poz)*10,wez_kod());
+    else printf("\t\t\t<td width=\"10%%\" align=\"left\">%s</td>\n",wez_kod());
+
+    int ip=int(p*2+0.5);
+    printf(
+        "\t\t\t<td align=\"center\">%2.2f%%</td>\n"
+        "\t\t\t<td align=\"left\"><table border=\"0\" width=\"100%%\"><tr>\n"
+        "\t\t\t\t<td width=\"%d%%\" bgcolor=\"#FF0000\">&nbsp;</td>\n"
+        "\t\t\t\t<td>&nbsp;</td>\n"
+        "\t\t\t</tr></table></td>\n"
+        "\t\t</tr>\n",
+        p,
+        ip ? ip : 1
+    );
+}
+
+rozklad::~rozklad() {
+}
+
+
+//Klasa wezel
+wezel::wezel(int *wart,int poziom):
+    rozklad(wart,poziom) {
+    int suma=0;
+    for (int k=0;k<=poziom;k++)
+        suma+=wart[k];
+    for (int n=0;n<=13;n++) {
+        wart[poziom+1]=n;
+        dzieci[n]=poziom==2
+            ? suma+n==13 ? new rozklad(wart,poziom+1) : NULL
+            : suma+n<=13 ? (rozklad*)new wezel(wart,poziom+1) : NULL;
+    }
+}
+
+void wezel::inkrementuj(int *wart) {
+    rozklad::inkrementuj(wart);
+    dzieci[wart[poziom+1]]->inkrementuj(wart);
+}
+
+void wezel::dopisz_HTML(int il_prob) {
+    int il_dzieci=0;
+    for (int n=0;n<=13;n++)
+        if (dzieci[n]!=NULL && dzieci[n]->prawdopodobienstwo(il_prob)>0)
+            il_dzieci++;
+    if (il_dzieci!=1)
+        rozklad::dopisz_HTML(il_prob);
+
+    for (int n=0;n<=13;n++)
+        if (dzieci[n]!=NULL)
+            dzieci[n]->dopisz_HTML(il_prob);
+}
+
+wezel::~wezel() {
+    for (int n=0;n<=13;n++)
+        if (dzieci[n]!=NULL)
+            delete dzieci[n];
+}
+
+
+//Dla qsort
+int por(const void *a,const void *b) {
+     return *(const int *)b-*(const int *)a;
+}
+
+wezel *drzewa[14];
+
+//Wypisywanie na ekran tabelki punktów Miltona
+void pisz_miltona(char *tekst,int *MP,int min,int max,int il_prob) {
+    printf(
+            "<div align=\"left\">\n"
+            "\t<table width=\"100%%\" border=\"1\">\n"
+            "\t\t<tr>\n"
+            "\t\t\t<th width=\"10%%\" align=\"center\">Ilość punktów Miltona %s</th>\n"
+            "\t\t\t<th width=\"25%%\" align=\"center\">Prawdopodobieństwo zdobycia dokładnie takiej liczby punktów</th>\n"
+            "\t\t\t<th width=\"20%%\" align=\"center\">Wykres prawdopodobieństwa</th>\n"
+            "\t\t\t<th width=\"25%%\" align=\"center\">Prawdopodobieństwo zdobycia co najmniej takiej liczby punktów</th>\n"
+            "\t\t\t<th width=\"20%%\" align=\"center\">Wykres prawdopodobieństwa</th>\n"
+            "\t\t</tr>\n",tekst
+    );
+
+    for (int n=min;n<=max;n++) {
+        int suma=0;
+        for (int m=n;m<=40;m++)
+            suma+=MP[m];
+        double p1=double(MP[n])/il_prob*100;
+        int ip1=int(p1*10+0.5);
+        double p2=double(suma)/il_prob*100;
+        int ip2=int(p2+0.4999);
+        printf(
+            "\t\t<tr>\n"
+            "\t\t\t<td width=\"34%%\" align=\"center\">%d</td>\n"
+            "\t\t\t<td width=\"33%%\" align=\"center\">%2.2lf%%</td>\n"
+            "\t\t\t<td align=\"left\"><table border=\"0\" width=\"100%%\"><tr>\n"
+            "\t\t\t\t<td width=\"%d%%\" bgcolor=\"#FF0000\">&nbsp;</td>\n"
+            "\t\t\t\t<td>&nbsp;</td>\n"
+            "\t\t\t</tr></table></td>\n"
+            "\t\t\t<td width=\"33%%\" align=\"center\">%2.2lf%%</td>\n"
+            "\t\t\t<td align=\"left\"><table border=\"0\" width=\"100%%\"><tr>\n"
+            "\t\t\t\t<td width=\"%d%%\" bgcolor=\"#FF0000\">&nbsp;</td>\n"
+            "\t\t\t\t<td>&nbsp;</td>\n"
+            "\t\t\t</tr></table></td>\n"
+            "\t\t</tr>\n",
+            n,
+            p1,ip1 ? ip1 : 1,
+            p2,ip2 ? ip2 : 1
+        );
+    }
+
+    printf(
+        "\t</table>\n"
+        "</div>\n"
+    );
+}
+
+//Symulacja miliona rozdań metodą Monte Carlo
+void reka() {
+    int n;
+
+    for (n=0;n<=13;n++) {
+        int wart[4];
+        wart[0]=n;
+        drzewa[n]=new wezel(wart,0);
+    }
+
+    int MP[41];
+    memset(MP,0,sizeof(MP));
+    int MP_pary[41];
+    memset(MP_pary,0,sizeof(MP_pary));
+    int renons=0;
+    int cztery_pasy=0;
+    int mozemy_grac=0;
+    int obydwie_moga_grac=0;
+    int zatrzymania[5];
+    memset(zatrzymania,0,sizeof(zatrzymania));
+
+	//Symulacja
+    for (n=0;n<IL_PROB;n++) {
+        int wart[4][4];
+        memset(wart,0,sizeof(wart));
+        int punkty[4];
+        memset(punkty,0,sizeof(punkty));
+
+		//Rozdawanie
+        unsigned char karty[52];
+        memset(karty,255,sizeof(karty));
+        for (int m=0;m<52;m++) {
+            int k;
+            do {
+                k=rand()%52;
+            } while (karty[k]!=255);
+            karty[k]=(unsigned char)(m&3);
+            wart[m&3][k&3]++;
+            static int pkt[13]={4,3,2,1,0,0,0,0,0,0,0,0,0};
+            punkty[m&3]+=pkt[k>>2];
+        }
+
+		//Sytuacje
+        if (punkty[0]<12 && punkty[1]<12 && punkty[2]<12 && punkty[3]<12)
+            cztery_pasy++;
+        int moga_grac[2]={0,0};
+        MP_pary[punkty[0]+punkty[2]]++;
+        MP_pary[punkty[1]+punkty[3]]++;
+        for (int r=0;r<4;r++) {
+            MP[punkty[r]]++;
+            if (punkty[r]>=12 && punkty[(r+2)%4]>=7) {
+                mozemy_grac++;
+                moga_grac[r&1]=1;
+            }
+
+            int zatrzyman=0;
+            for (int kol=0;kol<=3;kol++)
+                if (karty[kol]==r) //ma asa
+                    zatrzyman++;
+                else if (karty[kol+4]==r && wart[r][kol]>=2) //ma zatrzymanie na królu
+                    zatrzyman++;
+                else if (karty[kol+8]==r && wart[r][kol]>=3) //ma zatrzymanie na damie
+                    zatrzyman++;
+            zatrzymania[zatrzyman]++;
+            
+            qsort(wart+r,4,sizeof(wart[0][0]),por);
+            if (wart[r][3]==0)
+                renons++;
+            drzewa[wart[r][0]]->inkrementuj(wart[r]);
+        }
+        if (moga_grac[0] && moga_grac[1])
+            obydwie_moga_grac++;
+    }
+
+	//Wyświetlanie wyników
+    printf(
+            "<div align=\"left\">\n"
+            "\t<table width=\"100%%\" border=\"1\">\n"
+            "\t\t<tr>\n"
+            "\t\t\t<th width=\"30%%\" colspan=\"3\" align=\"center\">Rozkład ręki</th>\n"
+            "\t\t\t<th width=\"20%%\" align=\"center\">Prawdopodobieństwo</th>\n"
+            "\t\t\t<th width=\"50%%\" align=\"center\">Wykres prawdopodobieństwa</th>\n"
+            "\t\t</tr>\n"
+    );
+    for (n=0;n<=13;n++) {
+        drzewa[n]->dopisz_HTML(IL_PROB*4);
+        delete drzewa[n];
+    }
+    printf(
+        "\t</table>\n"
+        "</div>\n"
+    );
+
+    printf("Prawdopodobieństwo braku zatrzymań (na asie, królu lub damie) w jakimkolwiek kolorze = %2.2lf%%<br>\n",
+        double(zatrzymania[0])/(IL_PROB*4)*100
+    );
+    printf("Prawdopodobieństwo zatrzymania w tylko jednym kolorze = %2.2lf%%<br>\n",
+        double(zatrzymania[1])/(IL_PROB*4)*100
+    );
+    printf("Prawdopodobieństwo zatrzymania w dwóch kolorach = %2.2lf%%<br>\n",
+        double(zatrzymania[2])/(IL_PROB*4)*100
+    );
+    printf("Prawdopodobieństwo zatrzymania w trzech kolorach = %2.2lf%%<br>\n",
+        double(zatrzymania[3])/(IL_PROB*4)*100
+    );
+    printf("Prawdopodobieństwo zatrzymania we wszystkich kolorach = %2.2lf%%<br>\n",
+        double(zatrzymania[4])/(IL_PROB*4)*100
+    );
+
+    printf("Prawdopodobieństwo posiadania renonsu = %2.2lf%%<br>\n",
+        double(renons)/(IL_PROB*4)*100
+    );
+    printf("Prawdopodobieństwo że nikt nie ma 12 punktów = %2.2lf%%<br>\n",
+        double(cztery_pasy)/IL_PROB*100
+    );
+    printf("Prawdopodobieństwo że ma się co najmniej 12 MP, a partner co najmniej 7 MP = %2.2lf%%<br>\n",
+        double(mozemy_grac)/(IL_PROB*4)*100
+    );
+    printf("Prawdopodobieństwo że sytuacja taka ma miejsce u obydwu par = %2.2lf%%<br>\n",
+        double(obydwie_moga_grac)/IL_PROB*100
+    );
+    pisz_miltona("na ręku",MP,0,27,IL_PROB*4);
+    pisz_miltona("w sumie w parze",MP_pary,3,37,IL_PROB*2);
+}
+
+//Rozkład kart w jednym kolorze u przeciwników
+void rozklady() {
+    printf(
+            "<div align=\"left\">\n"
+            "\t<table width=\"100%%\" border=\"1\">\n"
+            "\t\t<tr>\n"
+            "\t\t\t<th width=\"10%%\" align=\"center\">Liczba kart</th>\n"
+            "\t\t\t<th width=\"10%%\" align=\"center\">Rozkład</th>\n"
+            "\t\t\t<th width=\"10%%\" align=\"center\">Prawdopodobieństwo</th>\n"
+            "\t\t\t<th width=\"70%%\" align=\"center\">Wykres prawdopodobieństwa</th>\n"
+            "\t\t</tr>\n"
+    );
+
+    int rozklad[14];
+    for (int il=1;il<=13;il++) {
+        memset(rozklad,0,sizeof(rozklad));
+        for (int n=(1<<il)-1;n>=0;n--) {
+            int lewy=0;
+            for (int m=0;m<il;m++)
+                lewy+=(n>>m)&1;
+            rozklad[lewy]++;
+        }
+
+        printf(
+            "\t\t<tr>\n"
+            "\t\t\t<td align=\"center\" rowspan=\"%d\">%d</td>\n",
+            il+1, il
+        );
+        for (int k=0;k<=il;k++) {
+            double p=double(rozklad[k])/(1<<il)*100;
+            int ip=int(p*2+0.5);
+            char *kolor=(il & 1) ? "#000080" : "#008000";
+            if (k)
+                printf("\t\t<tr>\n");
+            printf(
+                "\t\t\t<td align=\"center\">%d-%d</td>\n"
+                "\t\t\t<td align=\"center\">%2.2f%%</td>\n"
+                "\t\t\t<td align=\"left\"><table border=\"0\" width=\"100%%\"><tr>\n"
+                "\t\t\t\t<td width=\"%d%%\" bgcolor=\"%s\">&nbsp;</td>\n"
+                "\t\t\t\t<td>&nbsp;</td>\n"
+                "\t\t\t</tr></table></td>\n"
+                "\t\t</tr>\n",
+                k,il-k,
+                p,
+                ip ? ip : 1,
+                kolor
+            );
+        }
+    }
+    printf(
+        "\t</table>\n"
+        "</div>\n"
+    );
+}
+
+//Główna procedura
+void main() {
+    reka();
+    rozklady();
+}
